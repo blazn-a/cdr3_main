@@ -4,7 +4,6 @@ import esm, pandas as pd, os
 
 AA = "ACDEFGHIKLMNPQRSTVWY"
 
-# Matches the MLP architecture from your training code
 class MLP(nn.Module):
     def __init__(self, in_dim):
         super().__init__()
@@ -15,46 +14,43 @@ class MLP(nn.Module):
         )
     def forward(self, x): return self.net(x)
 
-def load_scorer(ckpt_path: str, in_dim: int, device="cpu"):
-    print(f">>> Loading scorer: {ckpt_path}")
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    # Extracts mu and sd from your training save-state
-    mu = torch.from_numpy(ckpt["mu"]).to(device).to(torch.float32)
-    sd = torch.from_numpy(ckpt["sd"]).to(device).to(torch.float32)
+def load_scorer(ckpt_path: str, in_dim: int):
+    print(f">>> loading checkpoint {ckpt_path} with weights_only=False")
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    mu = _to_numpy(ckpt["mu"])
+    sd = _to_numpy(ckpt["sd"])
     model = MLP(in_dim)
     model.load_state_dict(ckpt["state_dict"])
-    model.to(device).eval()
+    model.eval()
     return model, mu, sd
 
-def load_esm(model_name="t12_35M", device="cpu"):
-    print(f">>> Loading ESM model: {model_name}")
+def load_esm(model_name="t6_8M"):
     if model_name == "t6_8M":
         model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
     elif model_name == "t12_35M":
         model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
-    model.to(device).eval()
+    else:
+        raise ValueError("model_name must be t6_8M or t12_35M")
+    model.eval()
     return model, alphabet
 
-def embed_mean(model, alphabet, seqs, device="cpu", batch=64):
+def embed_mean(model, alphabet, seqs, batch=64):
     conv = alphabet.get_batch_converter()
     outs = []
     with torch.no_grad():
         for i in range(0, len(seqs), batch):
             batch_items = [(str(j), s) for j, s in enumerate(seqs[i:i+batch])]
             _, _, toks = conv(batch_items)
-            toks = toks.to(device)
-            results = model(toks, repr_layers=[model.num_layers])
-            rep = results["representations"][model.num_layers]
+            rep = model(toks, repr_layers=[model.num_layers])["representations"][model.num_layers]
             for k, s in enumerate(seqs[i:i+batch]):
-                # mean across the sequence length (excluding BOS/EOS)
-                outs.append(rep[k, 1:1+len(s)].mean(0))
-    return torch.stack(outs)
+                outs.append(rep[k, 1:1+len(s)].mean(0).detach().cpu().numpy())
+    return np.vstack(outs).astype(np.float32)
 
 def mutate(seq, k=1):
     s = list(seq)
+    L = len(s)
     for _ in range(k):
-        # Your specific patch: never mutate index 0
-        i = random.randrange(1, len(s))
+        i = random.randrange(1, L) 
         s[i] = random.choice(AA)
     return "".join(s)
 
