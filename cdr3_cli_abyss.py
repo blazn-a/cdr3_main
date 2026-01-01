@@ -15,7 +15,7 @@ STATE_FILE = "ui_state.json"
 DEFAULTS = {
     # core
     "antigen": "",
-    "seed_cdr3": "CARDRSTGYVYFDYW",
+    "seed_cdr3": "ARERDYRLDY",
     "esm": "t12_35M",           # default to the stronger backbone
     "checkpoint": "score_model.pt",
 
