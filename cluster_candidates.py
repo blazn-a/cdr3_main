@@ -2,11 +2,11 @@ import argparse, csv, numpy as np
 from sklearn.cluster import KMeans
 import esm
 
-def embed_cdr3s(seqs, model_name="t6_8M", batch=64):
-    if model_name == "t6_8M":
-        model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
-    elif model_name == "t12_35M":
+def embed_cdr3s(seqs, model_name="t12_35M", batch=64):
+    if model_name == "t12_35M":
         model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
+    elif model_name == "t6_8M":
+        model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
     else:
         raise ValueError("model_name must be t6_8M or t12_35M")
     model.eval()
@@ -61,6 +61,6 @@ if __name__ == "__main__":
     ap.add_argument("--inp", required=True, help="CSV from optimizer or filtered CSV")
     ap.add_argument("--out", required=True, help="Output panel CSV")
     ap.add_argument("--k", type=int, default=12, help="Number of clusters / panel size")
-    ap.add_argument("--esm", default="t6_8M", choices=["t6_8M","t12_35M"])
+    ap.add_argument("--esm", default="t12_35M", choices=["t6_8M","t12_35M"])
     args = ap.parse_args()
     main(args.inp, args.out, args.k, args.esm)

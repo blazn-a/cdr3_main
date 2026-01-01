@@ -30,11 +30,11 @@ def load_scorer(ckpt_path: str, in_dim: int):
     model.eval()
     return model, mu, sd
 
-def load_esm(model_name="t6_8M"):
-    if model_name == "t6_8M":
-        model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
-    elif model_name == "t12_35M":
+def load_esm(model_name="t12_35M"):
+    if model_name == "t12_35M":
         model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
+    elif model_name == "t6_8M":
+        model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
     else:
         raise ValueError("model_name must be t6_8M or t12_35M")
     model.eval()
@@ -63,26 +63,22 @@ def score_pairs(scorer, mu, sd, antigen_emb, cdr_embs):
     return scores
 
 # ---- 8/23/25 patched: keep leading 'C' and never mutate index 0
+# ---- 12/31/25 patched: remove C constraint from mutate()
 def mutate(seq, k=1):
     s = list(seq)
     L = len(s)
     for _ in range(k):
         i = random.randrange(1, L)  # never mutate first position
         s[i] = random.choice(AA)
-    s[0] = 'C'  # enforce leading C
     return "".join(s)
 
 def optimize(antigen_seq, start_cdr3, steps=200, beam=20, k_mut=1,
-             esm_model_name="t6_8M", ckpt_path="score_model.pt",
+             esm_model_name="t12_35M", ckpt_path="score_model.pt",
              embed_batch=64, topk=5):
     esm_model, alphabet = load_esm(esm_model_name)
     antigen_emb = embed_mean(esm_model, alphabet, [antigen_seq], batch=embed_batch)[0]
 
     scorer, mu, sd = load_scorer(ckpt_path, in_dim=antigen_emb.size * 2)
-
-    # enforce leading C on the seed
-    if not start_cdr3.startswith('C'):
-        start_cdr3 = 'C' + start_cdr3[1:]
 
     pool = [start_cdr3]
     pool_scores = np.array([0.0])
@@ -110,7 +106,7 @@ if __name__ == "__main__":
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--beam", type=int, default=20)
     ap.add_argument("--k_mut", type=int, default=1)
-    ap.add_argument("--esm", default="t6_8M", choices=["t6_8M","t12_35M"])
+    ap.add_argument("--esm", default="t12_35M", choices=["t6_8M","t12_35M"])
     ap.add_argument("--ckpt", default="score_model.pt")
     ap.add_argument("--embed_batch", type=int, default=64)
     ap.add_argument("--topk", type=int, default=5)

@@ -6,10 +6,10 @@ EMB_OUT = "data/pair_embeddings.npy"
 LAB_OUT = "data/labels.npy"
 
 def load_model(name):
-    if name == "t6_8M":
-        return esm.pretrained.esm2_t6_8M_UR50D()
-    elif name == "t12_35M":
+    if name == "t12_35M":
         return esm.pretrained.esm2_t12_35M_UR50D()
+    elif name == "t6_8M":
+        return esm.pretrained.esm2_t6_8M_UR50D()
     else:
         raise ValueError("model must be one of: t6_8M, t12_35M")
 
@@ -34,7 +34,7 @@ def main():
     ap.add_argument("--csv", default=CSV)
     ap.add_argument("--emb_out", default=EMB_OUT)
     ap.add_argument("--lab_out", default=LAB_OUT)
-    ap.add_argument("--model", default="t6_8M", choices=["t6_8M","t12_35M"])
+    ap.add_argument("--model", default="t12_35M", choices=["t6_8M","t12_35M"])
     ap.add_argument("--batch", type=int, default=4)          # keep small on CPU
     ap.add_argument("--threads", type=int, default=2)        # limit BLAS threads
     ap.add_argument("--force_cpu", action="store_true")
