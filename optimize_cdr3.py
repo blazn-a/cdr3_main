@@ -30,11 +30,11 @@ def load_scorer(ckpt_path: str, in_dim: int):
     model.eval()
     return model, mu, sd
 
-def load_esm(model_name="t12_35M"):
-    if model_name == "t12_35M":
-        model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
-    elif model_name == "t6_8M":
+def load_esm(model_name="t6_8M"):
+    if model_name == "t6_8M":
         model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
+    elif model_name == "t12_35M":
+        model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
     else:
         raise ValueError("model_name must be t6_8M or t12_35M")
     model.eval()
@@ -73,7 +73,7 @@ def mutate(seq, k=1):
     return "".join(s)
 
 def optimize(antigen_seq, start_cdr3, steps=200, beam=20, k_mut=1,
-             esm_model_name="t12_35M", ckpt_path="score_model.pt",
+             esm_model_name="t6_8M", ckpt_path="score_model.pt",
              embed_batch=64, topk=5):
     esm_model, alphabet = load_esm(esm_model_name)
     antigen_emb = embed_mean(esm_model, alphabet, [antigen_seq], batch=embed_batch)[0]

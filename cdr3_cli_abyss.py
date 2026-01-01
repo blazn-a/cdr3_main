@@ -183,7 +183,7 @@ def action_edit(S):
             S["seed_cdr3"] = input("Seed CDR3:\n> ").strip()
         elif ch == "3":
             v = input("ESM backbone [t6_8M/t12_35M]: ").strip()
-            if v in ("t6_8M","t12_35M"): S["esm"] = v
+            if v in ("t12_35M","t6_8M"): S["esm"] = v
         elif ch == "4":
             S["checkpoint"] = input("Checkpoint path:\n> ").strip() or S["checkpoint"]
         elif ch == "5":
