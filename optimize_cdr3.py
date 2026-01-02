@@ -30,13 +30,14 @@ def load_scorer(ckpt_path: str, in_dim: int):
     model.eval()
     return model, mu, sd
 
-def load_esm(model_name="t6_8M"):
-    if model_name == "t6_8M":
-        model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
-    elif model_name == "t12_35M":
-        model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
+
+def load_model(name):
+    if name == "t12_35M":
+        return esm.pretrained.esm2_t12_35M_UR50D()
+    elif name == "t6_8M":
+        return esm.pretrained.esm2_t6_8M_UR50D()
     else:
-        raise ValueError("model_name must be t6_8M or t12_35M")
+        raise ValueError("model must be one of: t6_8M, t12_35M")
     model.eval()
     return model, alphabet
 

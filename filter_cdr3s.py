@@ -59,7 +59,6 @@ def main(args):
             row["charge"] = f"{net_charge(seq):.1f}"
             row["hydro_run"] = max_hydrophobic_run(seq)
             row["has_nglyc"] = has_nglyc(seq)
-            row["warn_no_leading_C"] = (seq[:1] != "C")
             row["warn_len"] = (len(seq) < args.min_len or len(seq) > args.max_len)
             row["passes"] = "Y" if reason == "" else "N"
             row["fail_reason"] = reason
