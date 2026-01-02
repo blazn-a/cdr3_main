@@ -29,8 +29,8 @@ def load_esm(model_name="t12_35M", device="cpu"):
 
 def load_scorer(ckpt_path: str, in_dim: int, device="cpu"):
     print(f">>> Loading scorer: {ckpt_path}")
-    # Load checkpoint
-    ckpt = torch.load(ckpt_path, map_location=device) # removed weights_only=False for compatibility, add back if on torch 2.4+
+    # FIX: weights_only=False is required for PyTorch 2.6+ when loading checkpoints with numpy data
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     
     # Convert mu/sd to tensors on the correct device
     mu = torch.from_numpy(ckpt["mu"]).to(device).to(torch.float32)
@@ -53,7 +53,7 @@ def embed_mean(model, alphabet, seqs, batch=64, device="cpu"):
             batch_items = [(str(j), s) for j, s in enumerate(seqs[i:i+batch])]
             _, _, toks = conv(batch_items)
             
-            # CRITICAL FIX: Move tokens to the same device as the model
+            # Move tokens to the same device as the model
             toks = toks.to(device)
             
             # Forward pass
@@ -72,7 +72,7 @@ def mutate(seq, k=1):
     # Simple mutation: change k residues
     for _ in range(k):
         if L > 1:
-            i = random.randrange(0, L) # Changed from 1, L to 0, L to include first residue
+            i = random.randrange(0, L) 
             s[i] = random.choice(AA)
     return "".join(s)
 
@@ -94,7 +94,6 @@ def main():
     esm_model, alphabet = load_esm(args.esm, device)
     
     # Check embedding dimension logic
-    # We pass 'batch=1' and 'device=device' explicitly
     dummy_emb = embed_mean(esm_model, alphabet, ["CASS"], batch=1, device=device)
     in_dim = dummy_emb.shape[1] * 2 # A + C concatenated
     
@@ -137,12 +136,10 @@ def main():
                 cdr_embs_tensor = torch.from_numpy(cdr_embs_np).to(device) # Shape (N, 480)
                 
                 # Concatenate [Antigen_repeat, Candidates]
-                # Expand antigen to match number of candidates: (1, 480) -> (N, 480)
                 A_rep = ant_emb_tensor.repeat(len(candidates_list), 1)
-                
                 X = torch.cat([A_rep, cdr_embs_tensor], dim=1)
                 
-                # Standardize: (X - mu) / sd
+                # Standardize
                 X_scaled = (X - mu) / (sd + 1e-8)
                 
                 # Score
@@ -153,16 +150,15 @@ def main():
                 top_vals, top_idx = torch.topk(scores, k)
                 
                 pool = [candidates_list[i] for i in top_idx.cpu().numpy()]
-                pool_scores = top_vals.cpu().numpy()
 
-    # 4. Collect results (12 per input line)
-    for i in range(len(pool)):
-        results_list.append({
-        "pdb": pdb_id,
-        "antigen_seq": ant_seq,
-        "cdr3_seq": pool[i],  # Renamed from 'generated_cdr3' to match your request
-        "label": 0
-        })
+        # 4. Collect results (Exact format: pdb, antigen_seq, cdr3_seq, label)
+        for i in range(len(pool)):
+            results_list.append({
+                "pdb": pdb_id,
+                "antigen_seq": ant_seq,
+                "cdr3_seq": pool[i], 
+                "label": 0  
+            })
 
     # 5. Save
     out_df = pd.DataFrame(results_list)
