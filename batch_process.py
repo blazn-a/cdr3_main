@@ -14,69 +14,97 @@ class MLP(nn.Module):
         )
     def forward(self, x): return self.net(x)
 
-def load_scorer(ckpt_path: str, in_dim: int):
-    print(f">>> loading checkpoint {ckpt_path} with weights_only=False")
-    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    mu = _to_numpy(ckpt["mu"])
-    sd = _to_numpy(ckpt["sd"])
-    model = MLP(in_dim)
-    model.load_state_dict(ckpt["state_dict"])
-    model.eval()
-    return model, mu, sd
-
-def load_esm(model_name="t6_8M"):
+def load_esm(model_name="t12_35M", device="cpu"):
+    print(f">>> Loading ESM model: {model_name}")
     if model_name == "t6_8M":
         model, alphabet = esm.pretrained.esm2_t6_8M_UR50D()
     elif model_name == "t12_35M":
         model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
     else:
         raise ValueError("model_name must be t6_8M or t12_35M")
-    model.eval()
+    
+    # Move model to GPU
+    model.to(device).eval() 
     return model, alphabet
 
-def embed_mean(model, alphabet, seqs, batch=64):
+def load_scorer(ckpt_path: str, in_dim: int, device="cpu"):
+    print(f">>> Loading scorer: {ckpt_path}")
+    # Load checkpoint
+    ckpt = torch.load(ckpt_path, map_location=device) # removed weights_only=False for compatibility, add back if on torch 2.4+
+    
+    # Convert mu/sd to tensors on the correct device
+    mu = torch.from_numpy(ckpt["mu"]).to(device).to(torch.float32)
+    sd = torch.from_numpy(ckpt["sd"]).to(device).to(torch.float32)
+    
+    model = MLP(in_dim)
+    model.load_state_dict(ckpt["state_dict"])
+    model.to(device).eval()
+    return model, mu, sd
+
+def embed_mean(model, alphabet, seqs, batch=64, device="cpu"):
+    """
+    Computes mean embeddings.
+    Returns: Numpy array (N, dim)
+    """
     conv = alphabet.get_batch_converter()
     outs = []
     with torch.no_grad():
         for i in range(0, len(seqs), batch):
             batch_items = [(str(j), s) for j, s in enumerate(seqs[i:i+batch])]
             _, _, toks = conv(batch_items)
-            rep = model(toks, repr_layers=[model.num_layers])["representations"][model.num_layers]
+            
+            # CRITICAL FIX: Move tokens to the same device as the model
+            toks = toks.to(device)
+            
+            # Forward pass
+            res = model(toks, repr_layers=[model.num_layers])
+            rep = res["representations"][model.num_layers]
+            
             for k, s in enumerate(seqs[i:i+batch]):
+                # Slice [1 : len(s)+1] to remove start/end tokens, mean pool, move to CPU numpy
                 outs.append(rep[k, 1:1+len(s)].mean(0).detach().cpu().numpy())
+                
     return np.vstack(outs).astype(np.float32)
 
 def mutate(seq, k=1):
     s = list(seq)
     L = len(s)
+    # Simple mutation: change k residues
     for _ in range(k):
-        i = random.randrange(1, L) 
-        s[i] = random.choice(AA)
+        if L > 1:
+            i = random.randrange(0, L) # Changed from 1, L to 0, L to include first residue
+            s[i] = random.choice(AA)
     return "".join(s)
 
 def main():
-    print(f"Using device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
+    # Setup Device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", default="original_pos.csv", help="Your 1027 true pairs")
-    parser.add_argument("--output", default="optimized_negatives.csv", help="Where to save 12k lines")
+    parser.add_argument("--input", default="original_pos.csv", help="Input CSV with antigen_seq and cdr3_seq")
+    parser.add_argument("--output", default="optimized_negatives.csv", help="Output CSV")
     parser.add_argument("--ckpt", default="score_model.pt")
     parser.add_argument("--esm", default="t12_35M")
     parser.add_argument("--steps", type=int, default=100)
-    parser.add_argument("--beam", type=int, default=12) # Sets 12 outputs per input
+    parser.add_argument("--beam", type=int, default=12) 
     args = parser.parse_args()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 1. Initialization
     esm_model, alphabet = load_esm(args.esm, device)
     
-    # Check embedding dimension
-    test_emb = embed_mean(esm_model, alphabet, ["CASS"], device)
-    in_dim = test_emb.shape[1] * 2 # A + C concatenated
+    # Check embedding dimension logic
+    # We pass 'batch=1' and 'device=device' explicitly
+    dummy_emb = embed_mean(esm_model, alphabet, ["CASS"], batch=1, device=device)
+    in_dim = dummy_emb.shape[1] * 2 # A + C concatenated
     
     scorer, mu, sd = load_scorer(args.ckpt, in_dim, device)
 
     # 2. Read Input
+    if not os.path.exists(args.input):
+        print(f"Error: {args.input} not found.")
+        return
+
     df = pd.read_csv(args.input)
     results_list = []
 
@@ -89,7 +117,10 @@ def main():
         pdb_id = row.get('pdb', 'N/A')
 
         with torch.no_grad():
-            ant_emb = embed_mean(esm_model, alphabet, [ant_seq], device)
+            # Get Antigen Embedding (Numpy) -> Convert to Tensor -> GPU
+            ant_emb_np = embed_mean(esm_model, alphabet, [ant_seq], batch=1, device=device)
+            ant_emb_tensor = torch.from_numpy(ant_emb_np).to(device) # Shape (1, 480)
+
             pool = [cdr_seq]
             
             for _ in range(args.steps):
@@ -99,32 +130,39 @@ def main():
                     for _ in range(3):
                         candidates.add(mutate(s))
                 
-                candidates = list(candidates)
-                cdr_embs = embed_mean(esm_model, alphabet, candidates, device)
+                candidates_list = list(candidates)
                 
-                # Standardize as per your training code: X = (X - mu) / sd
+                # Get Candidate Embeddings (Numpy) -> Convert to Tensor -> GPU
+                cdr_embs_np = embed_mean(esm_model, alphabet, candidates_list, batch=64, device=device)
+                cdr_embs_tensor = torch.from_numpy(cdr_embs_np).to(device) # Shape (N, 480)
+                
                 # Concatenate [Antigen_repeat, Candidates]
-                A_rep = ant_emb.repeat(len(candidates), 1)
-                X = torch.cat([A_rep, cdr_embs], dim=1)
+                # Expand antigen to match number of candidates: (1, 480) -> (N, 480)
+                A_rep = ant_emb_tensor.repeat(len(candidates_list), 1)
+                
+                X = torch.cat([A_rep, cdr_embs_tensor], dim=1)
+                
+                # Standardize: (X - mu) / sd
                 X_scaled = (X - mu) / (sd + 1e-8)
                 
-                scores = scorer(X_scaled).squeeze(1)
+                # Score
+                scores = scorer(X_scaled).squeeze(1) # Shape (N,)
                 
                 # Select top (beam)
-                top_vals, top_idx = torch.topk(scores, min(args.beam, len(candidates)))
-                pool = [candidates[i] for i in top_idx]
+                k = min(args.beam, len(candidates_list))
+                top_vals, top_idx = torch.topk(scores, k)
+                
+                pool = [candidates_list[i] for i in top_idx.cpu().numpy()]
                 pool_scores = top_vals.cpu().numpy()
 
-        # 4. Collect results (12 per input line)
-        for i in range(len(pool)):
-            results_list.append({
-                "pdb": pdb_id,
-                "antigen_seq": ant_seq,
-                "original_cdr3": cdr_seq,
-                "generated_cdr3": pool[i],
-                "score": f"{pool_scores[i]:.6f}",
-                "label": 0  # These are now your "optimized negatives"
-            })
+    # 4. Collect results (12 per input line)
+    for i in range(len(pool)):
+        results_list.append({
+        "pdb": pdb_id,
+        "antigen_seq": ant_seq,
+        "cdr3_seq": pool[i],  # Renamed from 'generated_cdr3' to match your request
+        "label": 0
+        })
 
     # 5. Save
     out_df = pd.DataFrame(results_list)
